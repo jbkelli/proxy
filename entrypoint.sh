@@ -20,9 +20,6 @@ if [ -f "/app/secure-proxy" ]; then
     echo "✓ secure-proxy binary exists"
     ls -lh /app/secure-proxy
     echo ""
-    echo "File type:"
-    file /app/secure-proxy
-    echo ""
     echo "Checking binary dependencies..."
     ldd /app/secure-proxy 2>&1 || echo "ldd check failed"
     echo ""
