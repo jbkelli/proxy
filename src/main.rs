@@ -31,16 +31,24 @@ impl Config {
         info!("Configuration parsed successfully");
         Ok(config)
     }
-    
+
     fn is_valid_token(&self, token: Option<&hyper::header::HeaderValue>) -> bool {
         if let Some(token_value) = token {
             if let Ok(token_str) = token_value.to_str() {
                 let is_valid = self.tokens.values().any(|valid_token| valid_token == token_str);
                 if is_valid {
                     info!("✅ Token validation successful");
-                    debug!("Valid token: {}...{}", &token_str[..token_str.len().min(4)], &token_str[token_str.len().saturating_sub(4)..]);
+                    debug!(
+                        "Valid token: {}...{}",
+                        &token_str[..token_str.len().min(4)],
+                        &token_str[token_str.len().saturating_sub(4)..]
+                    );
                 } else {
-                    warn!("❌ Invalid token provided: {}...{}", &token_str[..token_str.len().min(4)], &token_str[token_str.len().saturating_sub(4)..]);
+                    warn!(
+                        "❌ Invalid token provided: {}...{}",
+                        &token_str[..token_str.len().min(4)],
+                        &token_str[token_str.len().saturating_sub(4)..]
+                    );
                 }
                 return is_valid;
             } else {
@@ -54,10 +62,13 @@ impl Config {
 }
 
 #[instrument(skip(req, config), fields(method = %req.method(), uri = %req.uri()))]
-async fn handle_request(req: Request<Body>, config: Arc<Config>) -> Result<Response<Body>, Infallible> {
+async fn handle_request(
+    req: Request<Body>,
+    config: Arc<Config>,
+) -> Result<Response<Body>, Infallible> {
     info!("📨 Incoming request: {} {}", req.method(), req.uri());
     debug!("Request headers: {:?}", req.headers());
-    
+
     // Health check endpoint (no auth required)
     if req.method() == Method::GET && req.uri().path() == "/health" {
         return Ok(Response::builder()
@@ -65,16 +76,20 @@ async fn handle_request(req: Request<Body>, config: Arc<Config>) -> Result<Respo
             .body(Body::from("OK"))
             .unwrap());
     }
-    
-    // Check for X-Proxy-Token header (applies to ALL requests including CONNECT)
-    debug!("Validating token for {} request", req.method());
-    let token = req.headers().get("X-Proxy-Token");
-    if !config.is_valid_token(token) {
-        warn!("🚫 Rejecting request due to invalid/missing token");
-        return Ok(Response::builder()
-            .status(403)
-            .body(Body::from("Invalid or missing token"))
-            .unwrap());
+
+    // Require token only for non-CONNECT (HTTP) requests
+    if req.method() != Method::CONNECT {
+        debug!("Validating token for {} request", req.method());
+        let token = req.headers().get("X-Proxy-Token");
+        if !config.is_valid_token(token) {
+            warn!("🚫 Rejecting request due to invalid/missing token");
+            return Ok(Response::builder()
+                .status(403)
+                .body(Body::from("Invalid or missing token"))
+                .unwrap());
+        }
+    } else {
+        debug!("Skipping token validation for CONNECT");
     }
 
     // Handle HTTPS CONNECT method
@@ -93,7 +108,10 @@ async fn handle_http(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let client = Client::new();
     match client.request(req).await {
         Ok(response) => {
-            info!("✅ HTTP request forwarded successfully, status: {}", response.status());
+            info!(
+                "✅ HTTP request forwarded successfully, status: {}",
+                response.status()
+            );
             debug!("Response headers: {:?}", response.headers());
             Ok(response)
         }
@@ -110,7 +128,7 @@ async fn handle_http(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 #[instrument(skip(req), fields(uri = %req.uri()))]
 async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let uri_str = req.uri().to_string();
-    
+
     // Extract host:port from URI
     // Some clients send "example.com:443", others send "https://example.com:443"
     let mut target = if uri_str.contains("://") {
@@ -119,27 +137,31 @@ async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infall
             if let Some(authority) = parsed_uri.authority() {
                 authority.to_string()
             } else {
-                warn!("⚠️  No authority in URI: {}", uri_str);
+                warn!("⚠️ No authority in URI: {}", uri_str);
                 uri_str
             }
         } else {
-            warn!("⚠️  Failed to parse URI: {}", uri_str);
+            warn!("⚠️ Failed to parse URI: {}", uri_str);
             uri_str
         }
     } else {
         // Already in host:port format
         uri_str
     };
-    
+
     // Add default port 443 if no port specified
     if !target.contains(':') {
         debug!("No port specified for CONNECT, defaulting to 443");
         target = format!("{}:443", target);
     }
-    
+
     info!("🔐 Handling HTTPS CONNECT request to: {}", target);
-    debug!("CONNECT request details - URI: {}, Version: {:?}", req.uri(), req.version());
-    
+    debug!(
+        "CONNECT request details - URI: {}, Version: {:?}",
+        req.uri(),
+        req.version()
+    );
+
     tokio::task::spawn(async move {
         match hyper::upgrade::on(&mut req).await {
             Ok(upgraded) => {
@@ -164,17 +186,20 @@ async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infall
 // Create a tunnel between client and target server
 async fn tunnel(mut upgraded: Upgraded, target: String) -> std::io::Result<()> {
     info!("🔗 Establishing tunnel to {}", target);
-    
+
     // Connect to the target server
     let mut server = TcpStream::connect(&target).await?;
     info!("✅ Connected to target server: {}", target);
-    
+
     // Bidirectional copy between client and server
-    let (from_client, from_server) = tokio::io::copy_bidirectional(&mut upgraded, &mut server).await?;
-    
-    info!("🔚 Tunnel closed: {} - {} bytes from client, {} bytes from server", 
-          target, from_client, from_server);
-    
+    let (from_client, from_server) =
+        tokio::io::copy_bidirectional(&mut upgraded, &mut server).await?;
+
+    info!(
+        "🔚 Tunnel closed: {} - {} bytes from client, {} bytes from server",
+        target, from_client, from_server
+    );
+
     Ok(())
 }
 
@@ -185,12 +210,12 @@ async fn main() {
     println!("DEBUG: Rust main() started");
     std::io::Write::flush(&mut std::io::stdout()).ok();
     std::io::Write::flush(&mut std::io::stderr()).ok();
-    
+
     // Print to stdout BEFORE tracing init - these will show in Render logs
     println!("=== STARTING PROXY SERVER ===");
     println!("Current directory: {:?}", std::env::current_dir());
     println!("Checking for config.toml...");
-    
+
     // Check if config file exists
     if std::path::Path::new("config.toml").exists() {
         println!("✓ config.toml found!");
@@ -203,16 +228,16 @@ async fn main() {
             }
         }
     }
-    
+
     // Initialize tracing subscriber
     tracing_subscriber::fmt()
         .with_target(false)
         .with_thread_ids(true)
         .with_line_number(true)
         .init();
-    
+
     info!("🚀 Secure proxy server starting...");
-    
+
     // Load configuration
     println!("Loading config from config.toml...");
     let config = match Config::load("config.toml") {
@@ -228,33 +253,44 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    
+
     // Override port with PORT environment variable if set (required for Render)
     let port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(config.server.port);
-    
+
     info!("📍 Host: {}", config.server.host);
-    info!("🔌 Port: {} {}", port, if std::env::var("PORT").is_ok() { "(from PORT env var)" } else { "(from config)" });
+    info!(
+        "🔌 Port: {} {}",
+        port,
+        if std::env::var("PORT").is_ok() {
+            "(from PORT env var)"
+        } else {
+            "(from config)"
+        }
+    );
     info!("🔑 Loaded {} valid token(s)", config.tokens.len());
     debug!("Token users: {:?}", config.tokens.keys().collect::<Vec<_>>());
     info!("✅ Configuration loaded successfully");
-    
+
     // Build server address
     let addr_str = format!("{}:{}", config.server.host, port);
     println!("About to bind to: {}", addr_str);
-    
+
     let addr: SocketAddr = match addr_str.parse() {
         Ok(a) => a,
         Err(e) => {
             eprintln!("❌ Failed to parse server address '{}': {}", addr_str, e);
-            error!("❌ Failed to parse server address '{}': {}", addr_str, e);
+            error!(
+                "❌ Failed to parse server address '{}': {}",
+                addr_str, e
+            );
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             std::process::exit(1);
         }
     };
-    
+
     // Create service
     let config_clone = config.clone();
     let make_svc = make_service_fn(move |_conn| {
@@ -266,17 +302,17 @@ async fn main() {
             }))
         }
     });
-    
+
     // Build and run server
     info!("Attempting to bind to {}", addr);
     println!("Attempting to bind to {}", addr);
     let server = Server::bind(&addr).serve(make_svc);
-    
+
     info!("🎯 Proxy server listening on http://{}", addr);
     println!("✅ Server successfully bound and listening on http://{}", addr);
     info!("📝 Send requests with 'X-Proxy-Token' header for authentication");
     info!("🌐 Ready to proxy HTTP and HTTPS requests");
-    
+
     // Run the server
     if let Err(e) = server.await {
         error!("❌ Server error: {}", e);
