@@ -27,5 +27,16 @@ echo "Environment variables:"
 echo "PORT=$PORT"
 echo "RUST_LOG=$RUST_LOG"
 
+# Enable Rust backtraces for better error messages
+export RUST_BACKTRACE=1
+
+# Set basic logging if not set
+if [ -z "$RUST_LOG" ]; then
+    export RUST_LOG=info
+    echo "Set RUST_LOG=info (was empty)"
+fi
+
 echo "=== STARTING PROXY ==="
-exec /app/secure-proxy
+echo "Running: /app/secure-proxy"
+echo "With stderr redirected to stdout for full visibility..."
+exec /app/secure-proxy 2>&1
