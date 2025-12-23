@@ -215,8 +215,10 @@ async fn main() {
             Arc::new(cfg)
         }
         Err(e) => {
-            eprintln!("❌ Failed to load config.toml: {}", e);
-            error!("❌ Failed to load config.toml: {}", e);
+            eprintln!("❌ Failed to load config.toml: {e:?}");
+            error!("❌ Failed to load config.toml: {e:?}");
+            // Keep process alive briefly so logs flush
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             std::process::exit(1);
         }
     };
@@ -234,9 +236,18 @@ async fn main() {
     info!("✅ Configuration loaded successfully");
     
     // Build server address
-    let addr: SocketAddr = format!("{}:{}", config.server.host, port)
-        .parse()
-        .expect("Failed to parse server address");
+    let addr_str = format!("{}:{}", config.server.host, port);
+    println!("About to bind to: {}", addr_str);
+    
+    let addr: SocketAddr = match addr_str.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("❌ Failed to parse server address '{}': {}", addr_str, e);
+            error!("❌ Failed to parse server address '{}': {}", addr_str, e);
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            std::process::exit(1);
+        }
+    };
     
     // Create service
     let config_clone = config.clone();
@@ -251,9 +262,12 @@ async fn main() {
     });
     
     // Build and run server
+    info!("Attempting to bind to {}", addr);
+    println!("Attempting to bind to {}", addr);
     let server = Server::bind(&addr).serve(make_svc);
     
     info!("🎯 Proxy server listening on http://{}", addr);
+    println!("✅ Server successfully bound and listening on http://{}", addr);
     info!("📝 Send requests with 'X-Proxy-Token' header for authentication");
     info!("🌐 Ready to proxy HTTP and HTTPS requests");
     
