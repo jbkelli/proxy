@@ -178,15 +178,6 @@ async fn tunnel(mut upgraded: Upgraded, target: String) -> std::io::Result<()> {
     Ok(())
 }
 
-// TEMPORARY TEST: Simplest possible main
-fn main() {
-    eprintln!("STDERR: main() entered");
-    println!("STDOUT: main() entered");
-    std::process::exit(99);
-}
-
-// Keep async main commented for now
-/*
 #[tokio::main]
 async fn main() {
     // Print IMMEDIATELY before anything else
@@ -292,4 +283,3 @@ async fn main() {
         std::process::exit(1);
     }
 }
-*/
