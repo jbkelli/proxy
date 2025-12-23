@@ -180,9 +180,23 @@ async fn tunnel(mut upgraded: Upgraded, target: String) -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() {
-    // Print to stdout BEFORE tracing init
+    // Print to stdout BEFORE tracing init - these will show in Render logs
     println!("=== STARTING PROXY SERVER ===");
     println!("Current directory: {:?}", std::env::current_dir());
+    println!("Checking for config.toml...");
+    
+    // Check if config file exists
+    if std::path::Path::new("config.toml").exists() {
+        println!("✓ config.toml found!");
+    } else {
+        eprintln!("✗ config.toml NOT FOUND in current directory!");
+        println!("Files in current directory:");
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for entry in entries.flatten() {
+                println!("  - {}", entry.path().display());
+            }
+        }
+    }
     
     // Initialize tracing subscriber
     tracing_subscriber::fmt()
