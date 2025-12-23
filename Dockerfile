@@ -40,11 +40,14 @@ COPY --from=builder /app/target/release/secure-proxy /app/secure-proxy
 # Copy config file (use example as template)
 COPY config.toml.example /app/config.toml
 
-# Make binary executable (just in case)
-RUN chmod +x /app/secure-proxy
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+
+# Make binary and entrypoint executable
+RUN chmod +x /app/secure-proxy /app/entrypoint.sh
 
 # Expose the proxy port
 EXPOSE 8080
 
-# Run the proxy
-CMD ["./secure-proxy"]
+# Run via entrypoint script for better logging
+CMD ["/app/entrypoint.sh"]
