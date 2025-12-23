@@ -1,0 +1,47 @@
+# Build stage
+FROM rust:1.83-slim as builder
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y pkg-config libssl-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy manifests
+COPY Cargo.toml ./
+
+# Create a dummy main.rs to cache dependencies
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+
+# Build dependencies (this layer will be cached)
+RUN cargo build --release
+RUN rm -rf src
+
+# Copy source code
+COPY src ./src
+
+# Build release binary
+RUN cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install CA certificates for HTTPS
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the binary from builder
+COPY --from=builder /app/target/release/secure-proxy /app/secure-proxy
+
+# Copy config file
+COPY config.toml /app/config.toml
+
+# Expose the proxy port
+EXPOSE 8080
+
+# Run the proxy
+CMD ["/app/secure-proxy"]

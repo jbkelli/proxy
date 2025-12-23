@@ -1,0 +1,26 @@
+# Rust build artifacts
+/target
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deployment secrets - DO NOT COMMIT THESE
+config.toml
+*.pem
+*.key
+
+# AWS specific
+.aws/
+aws-config-local.yaml
+
+# Docker
+docker-compose.override.yml

@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: secure-proxy
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: RUST_LOG
+        value: info
+      - key: PORT
+        value: 8080
+    healthCheckPath: /
+    numInstances: 1

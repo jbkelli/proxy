@@ -1,0 +1,13 @@
+# Example Configuration for Secure Proxy
+# Copy this file to config.toml and update with your values
+
+[server]
+port = 8080
+host = "0.0.0.0"  # Use "0.0.0.0" for AWS/cloud deployment, "127.0.0.1" for local only
+
+[tokens]
+# Replace these with your own secure tokens
+# Generate secure tokens with: openssl rand -hex 32
+user1 = "your-secure-token-here"
+user2 = "another-secure-token"
+admin = "admin-token-keep-this-secret"
