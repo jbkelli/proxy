@@ -43,5 +43,6 @@ COPY config.toml.example /app/config.toml
 # Expose the proxy port
 EXPOSE 8080
 
-# Run the proxy
-CMD ["/app/secure-proxy"]
+# Run the proxy with explicit working directory
+WORKDIR /app
+CMD ["./secure-proxy"]

@@ -58,6 +58,14 @@ async fn handle_request(req: Request<Body>, config: Arc<Config>) -> Result<Respo
     info!("📨 Incoming request: {} {}", req.method(), req.uri());
     debug!("Request headers: {:?}", req.headers());
     
+    // Health check endpoint (no auth required)
+    if req.method() == Method::GET && req.uri().path() == "/health" {
+        return Ok(Response::builder()
+            .status(200)
+            .body(Body::from("OK"))
+            .unwrap());
+    }
+    
     // Check for X-Proxy-Token header (applies to ALL requests including CONNECT)
     debug!("Validating token for {} request", req.method());
     let token = req.headers().get("X-Proxy-Token");
