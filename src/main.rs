@@ -58,17 +58,15 @@ async fn handle_request(req: Request<Body>, config: Arc<Config>) -> Result<Respo
     info!("📨 Incoming request: {} {}", req.method(), req.uri());
     debug!("Request headers: {:?}", req.headers());
     
-    // Check for X-Proxy-Token header (for non-CONNECT requests)
-    if req.method() != Method::CONNECT {
-        debug!("Validating token for non-CONNECT request");
-        let token = req.headers().get("X-Proxy-Token");
-        if !config.is_valid_token(token) {
-            warn!("🚫 Rejecting request due to invalid/missing token");
-            return Ok(Response::builder()
-                .status(403)
-                .body(Body::from("Invalid or missing token"))
-                .unwrap());
-        }
+    // Check for X-Proxy-Token header (applies to ALL requests including CONNECT)
+    debug!("Validating token for {} request", req.method());
+    let token = req.headers().get("X-Proxy-Token");
+    if !config.is_valid_token(token) {
+        warn!("🚫 Rejecting request due to invalid/missing token");
+        return Ok(Response::builder()
+            .status(403)
+            .body(Body::from("Invalid or missing token"))
+            .unwrap());
     }
 
     // Handle HTTPS CONNECT method
@@ -103,7 +101,34 @@ async fn handle_http(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
 #[instrument(skip(req), fields(uri = %req.uri()))]
 async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    let target = req.uri().to_string();
+    let uri_str = req.uri().to_string();
+    
+    // Extract host:port from URI
+    // Some clients send "example.com:443", others send "https://example.com:443"
+    let mut target = if uri_str.contains("://") {
+        // Parse full URI and extract authority (host:port)
+        if let Ok(parsed_uri) = uri_str.parse::<hyper::Uri>() {
+            if let Some(authority) = parsed_uri.authority() {
+                authority.to_string()
+            } else {
+                warn!("⚠️  No authority in URI: {}", uri_str);
+                uri_str
+            }
+        } else {
+            warn!("⚠️  Failed to parse URI: {}", uri_str);
+            uri_str
+        }
+    } else {
+        // Already in host:port format
+        uri_str
+    };
+    
+    // Add default port 443 if no port specified
+    if !target.contains(':') {
+        debug!("No port specified for CONNECT, defaulting to 443");
+        target = format!("{}:443", target);
+    }
+    
     info!("🔐 Handling HTTPS CONNECT request to: {}", target);
     debug!("CONNECT request details - URI: {}, Version: {:?}", req.uri(), req.version());
     
@@ -121,7 +146,11 @@ async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infall
         }
     });
 
-    Ok(Response::new(Body::empty()))
+    // Return explicit 200 Connection Established response
+    Ok(Response::builder()
+        .status(200)
+        .body(Body::empty())
+        .unwrap())
 }
 
 // Create a tunnel between client and target server
@@ -170,14 +199,20 @@ async fn main() {
         }
     };
     
+    // Override port with PORT environment variable if set (required for Render)
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(config.server.port);
+    
     info!("📍 Host: {}", config.server.host);
-    info!("🔌 Port: {}", config.server.port);
+    info!("🔌 Port: {} {}", port, if std::env::var("PORT").is_ok() { "(from PORT env var)" } else { "(from config)" });
     info!("🔑 Loaded {} valid token(s)", config.tokens.len());
     debug!("Token users: {:?}", config.tokens.keys().collect::<Vec<_>>());
     info!("✅ Configuration loaded successfully");
     
     // Build server address
-    let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port)
+    let addr: SocketAddr = format!("{}:{}", config.server.host, port)
         .parse()
         .expect("Failed to parse server address");
     

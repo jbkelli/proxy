@@ -17,7 +17,7 @@ Edit `config.toml` to configure your proxy:
 
 ```toml
 [server]
-port = 8080
+port = 8080  # Default port for local development (Render uses PORT env var)
 host = "0.0.0.0"  # Use "0.0.0.0" for cloud deployment
 
 [tokens]
@@ -25,6 +25,8 @@ user1 = "token-for-alice"
 user2 = "token-for-bob"
 admin = "super-secret-admin-token"
 ```
+
+**Note:** On Render, the PORT environment variable is automatically set and will override the `port` value in config.toml.
 
 ## Local Development
 
