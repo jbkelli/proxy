@@ -180,6 +180,12 @@ async fn tunnel(mut upgraded: Upgraded, target: String) -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() {
+    // Print IMMEDIATELY before anything else
+    eprintln!("DEBUG: Rust main() started");
+    println!("DEBUG: Rust main() started");
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    std::io::Write::flush(&mut std::io::stderr()).ok();
+    
     // Print to stdout BEFORE tracing init - these will show in Render logs
     println!("=== STARTING PROXY SERVER ===");
     println!("Current directory: {:?}", std::env::current_dir());
