@@ -21,8 +21,8 @@ RUN rm -rf src
 # Copy source code
 COPY src ./src
 
-# Build release binary - remove the old binary first to force rebuild
-RUN rm -f target/release/secure-proxy target/release/secure-proxy.d
+# Build release binary - FORCE COMPLETE REBUILD
+RUN cargo clean
 RUN cargo build --release
 
 # Runtime stage
