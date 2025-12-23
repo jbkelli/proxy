@@ -19,6 +19,12 @@ echo "Checking binary..."
 if [ -f "/app/secure-proxy" ]; then
     echo "✓ secure-proxy binary exists"
     ls -lh /app/secure-proxy
+    echo ""
+    echo "Checking binary dependencies..."
+    ldd /app/secure-proxy || echo "ldd check failed"
+    echo ""
+    echo "Testing if binary can execute..."
+    /app/secure-proxy --help 2>&1 || echo "Binary test failed with exit code: $?"
 else
     echo "✗ secure-proxy binary NOT FOUND"
 fi
