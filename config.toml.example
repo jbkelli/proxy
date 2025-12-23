@@ -1,13 +1,12 @@
 # Example Configuration for Secure Proxy
-# Copy this file to config.toml and update with your values
+# This file is used in Docker builds
 
 [server]
-port = 8080
-host = "0.0.0.0"  # Use "0.0.0.0" for AWS/cloud deployment, "127.0.0.1" for local only
+port = 8080  # Default for local dev (Render overrides with PORT env var)
+host = "0.0.0.0"  # Use 0.0.0.0 for cloud deployment
 
 [tokens]
-# Replace these with your own secure tokens
-# Generate secure tokens with: openssl rand -hex 32
-user1 = "your-secure-token-here"
-user2 = "another-secure-token"
-admin = "admin-token-keep-this-secret"
+# Replace these with your actual secure tokens before deploying
+user1 = "kaseykel@2026"
+user2 = "K@seykel@2026"
+admin = "K@tekatie2006"

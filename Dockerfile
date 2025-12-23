@@ -37,8 +37,8 @@ WORKDIR /app
 # Copy the binary from builder
 COPY --from=builder /app/target/release/secure-proxy /app/secure-proxy
 
-# Copy config file
-COPY config.toml /app/config.toml
+# Copy config file (use example as template)
+COPY config.toml.example /app/config.toml
 
 # Expose the proxy port
 EXPOSE 8080
