@@ -27,3 +27,4 @@ thiserror = "1.0"
 
 # For future HTTPS tunneling
 native-tls = "0.2"  # or rustls = "0.21"
+base64 = "0.22.1"

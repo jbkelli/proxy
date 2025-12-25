@@ -10,10 +10,14 @@ use std::sync::Arc;
 use tokio::net::TcpStream;
 use tracing::{info, warn, error, debug, instrument};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use hyper::header::{PROXY_AUTHORIZATION, PROXY_AUTHENTICATE};
+
 #[derive(Debug, Deserialize)]
 struct Config {
     server: ServerConfig,
-    tokens: HashMap<String, String>,
+    users: HashMap<String, String>, // username -> password
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,33 +39,54 @@ impl Config {
         Ok(config)
     }
 
-    fn is_valid_token(&self, token: Option<&hyper::header::HeaderValue>) -> bool {
-        if let Some(token_value) = token {
-            if let Ok(token_str) = token_value.to_str() {
-                let is_valid = self.tokens.values().any(|valid_token| valid_token == token_str);
-                if is_valid {
-                    info!("✅ Token validation successful");
-                    debug!(
-                        "Valid token: {}...{}",
-                        &token_str[..token_str.len().min(4)],
-                        &token_str[token_str.len().saturating_sub(4)..]
-                    );
+    fn is_valid_basic(&self, header: Option<&hyper::header::HeaderValue>) -> bool {
+        if let Some(value) = header {
+            if let Ok(v) = value.to_str() {
+                let parts: Vec<&str> = v.split_whitespace().collect();
+                if parts.len() == 2 && parts[0].eq_ignore_ascii_case("Basic") {
+                    if let Ok(decoded) = BASE64.decode(parts[1]) {
+                        if let Ok(creds) = String::from_utf8(decoded) {
+                            if let Some((user, pass)) = creds.split_once(':') {
+                                if let Some(stored) = self.users.get(user) {
+                                    let ok = stored == pass;
+                                    if ok {
+                                        info!("✅ Proxy auth successful for user '{}'", user);
+                                    } else {
+                                        warn!("❌ Proxy auth wrong password for user '{}'", user);
+                                    }
+                                    return ok;
+                                } else {
+                                    warn!("❌ Proxy auth unknown user '{}'", user);
+                                }
+                            } else {
+                                warn!("❌ Proxy auth creds missing ':' separator");
+                            }
+                        } else {
+                            warn!("❌ Proxy auth creds not UTF-8");
+                        }
+                    } else {
+                        warn!("❌ Proxy auth base64 decode failed");
+                    }
                 } else {
-                    warn!(
-                        "❌ Invalid token provided: {}...{}",
-                        &token_str[..token_str.len().min(4)],
-                        &token_str[token_str.len().saturating_sub(4)..]
-                    );
+                    warn!("❌ Proxy auth header is not Basic");
                 }
-                return is_valid;
             } else {
-                warn!("❌ Token header contains invalid UTF-8");
+                warn!("❌ Proxy auth header contains invalid UTF-8");
             }
         } else {
-            warn!("❌ No token provided in request");
+            warn!("❌ No Proxy-Authorization header provided");
         }
         false
     }
+}
+
+fn unauthorized_response() -> Response<Body> {
+    // 407 with Proxy-Authenticate as required by spec
+    Response::builder()
+        .status(407)
+        .header(PROXY_AUTHENTICATE, r#"Basic realm="Secure Proxy""#)
+        .body(Body::from("Proxy authentication required"))
+        .unwrap()
 }
 
 #[instrument(skip(req, config), fields(method = %req.method(), uri = %req.uri()))]
@@ -80,15 +105,11 @@ async fn handle_request(
             .unwrap());
     }
 
-    // Require token for ALL requests, including CONNECT
-    debug!("Validating token for {} request", req.method());
-    let token = req.headers().get("X-Proxy-Token");
-    if !config.is_valid_token(token) {
-        warn!("🚫 Rejecting request due to invalid/missing token");
-        return Ok(Response::builder()
-            .status(403)
-            .body(Body::from("Invalid or missing token"))
-            .unwrap());
+    // Require Proxy-Authorization for ALL requests (HTTP + CONNECT)
+    let auth_header = req.headers().get(PROXY_AUTHORIZATION);
+    if !config.is_valid_basic(auth_header) {
+        warn!("🚫 Rejecting request due to invalid/missing proxy credentials");
+        return Ok(unauthorized_response());
     }
 
     // Handle HTTPS CONNECT method vs normal HTTP
@@ -129,9 +150,7 @@ async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infall
     let uri_str = req.uri().to_string();
 
     // Extract host:port from URI
-    // Some clients send "example.com:443", others send "https://example.com:443"
     let mut target = if uri_str.contains("://") {
-        // Parse full URI and extract authority (host:port)
         if let Ok(parsed_uri) = uri_str.parse::<hyper::Uri>() {
             if let Some(authority) = parsed_uri.authority() {
                 authority.to_string()
@@ -144,7 +163,6 @@ async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infall
             uri_str
         }
     } else {
-        // Already in host:port format
         uri_str
     };
 
@@ -175,7 +193,6 @@ async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infall
         }
     });
 
-    // Return explicit 200 Connection Established response
     Ok(Response::builder()
         .status(200)
         .body(Body::empty())
@@ -186,11 +203,9 @@ async fn handle_connect(mut req: Request<Body>) -> Result<Response<Body>, Infall
 async fn tunnel(mut upgraded: Upgraded, target: String) -> std::io::Result<()> {
     info!("🔗 Establishing tunnel to {}", target);
 
-    // Connect to the target server
     let mut server = TcpStream::connect(&target).await?;
     info!("✅ Connected to target server: {}", target);
 
-    // Bidirectional copy between client and server
     let (from_client, from_server) =
         tokio::io::copy_bidirectional(&mut upgraded, &mut server).await?;
 
@@ -204,18 +219,15 @@ async fn tunnel(mut upgraded: Upgraded, target: String) -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() {
-    // Print IMMEDIATELY before anything else
     eprintln!("DEBUG: Rust main() started");
     println!("DEBUG: Rust main() started");
     std::io::Write::flush(&mut std::io::stdout()).ok();
     std::io::Write::flush(&mut std::io::stderr()).ok();
 
-    // Print to stdout BEFORE tracing init
     println!("=== STARTING PROXY SERVER ===");
     println!("Current directory: {:?}", std::env::current_dir());
     println!("Checking for config.toml...");
 
-    // Check if config file exists
     if std::path::Path::new("config.toml").exists() {
         println!("✓ config.toml found!");
     } else {
@@ -228,7 +240,6 @@ async fn main() {
         }
     }
 
-    // Initialize tracing subscriber
     tracing_subscriber::fmt()
         .with_target(false)
         .with_thread_ids(true)
@@ -237,7 +248,6 @@ async fn main() {
 
     info!("🚀 Secure proxy server starting...");
 
-    // Load configuration
     println!("Loading config from config.toml...");
     let config = match Config::load("config.toml") {
         Ok(cfg) => {
@@ -252,7 +262,6 @@ async fn main() {
         }
     };
 
-    // Override port with PORT environment variable if set
     let port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
@@ -268,11 +277,10 @@ async fn main() {
             "(from config)"
         }
     );
-    info!("🔑 Loaded {} valid token(s)", config.tokens.len());
-    debug!("Token users: {:?}", config.tokens.keys().collect::<Vec<_>>());
+    info!("🔑 Loaded {} user(s)", config.users.len());
+    debug!("Users: {:?}", config.users.keys().collect::<Vec<_>>());
     info!("✅ Configuration loaded successfully");
 
-    // Build server address
     let addr_str = format!("{}:{}", config.server.host, port);
     println!("About to bind to: {}", addr_str);
 
@@ -289,7 +297,6 @@ async fn main() {
         }
     };
 
-    // Create service
     let config_clone = config.clone();
     let make_svc = make_service_fn(move |_conn| {
         let config = config_clone.clone();
@@ -301,17 +308,14 @@ async fn main() {
         }
     });
 
-    // Build and run server
     info!("Attempting to bind to {}", addr);
     println!("Attempting to bind to {}", addr);
     let server = Server::bind(&addr).serve(make_svc);
 
     info!("🎯 Proxy server listening on http://{}", addr);
     println!("✅ Server successfully bound and listening on http://{}", addr);
-    info!("📝 Send requests with 'X-Proxy-Token' header for authentication");
-    info!("🌐 Ready to proxy HTTP and HTTPS requests");
+    info!("🌐 Ready to proxy HTTP and HTTPS requests with proxy authentication");
 
-    // Run the server
     if let Err(e) = server.await {
         error!("❌ Server error: {}", e);
         std::process::exit(1);
