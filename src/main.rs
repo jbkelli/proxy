@@ -26,7 +26,10 @@ impl Config {
     fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         info!("Loading configuration from: {}", path);
         let contents = fs::read_to_string(path)?;
-        debug!("Configuration file read successfully, {} bytes", contents.len());
+        debug!(
+            "Configuration file read successfully, {} bytes",
+            contents.len()
+        );
         let config: Config = toml::from_str(&contents)?;
         info!("Configuration parsed successfully");
         Ok(config)
@@ -77,22 +80,18 @@ async fn handle_request(
             .unwrap());
     }
 
-    // Require token only for non-CONNECT (HTTP) requests
-    if req.method() != Method::CONNECT {
-        debug!("Validating token for {} request", req.method());
-        let token = req.headers().get("X-Proxy-Token");
-        if !config.is_valid_token(token) {
-            warn!("🚫 Rejecting request due to invalid/missing token");
-            return Ok(Response::builder()
-                .status(403)
-                .body(Body::from("Invalid or missing token"))
-                .unwrap());
-        }
-    } else {
-        debug!("Skipping token validation for CONNECT");
+    // Require token for ALL requests, including CONNECT
+    debug!("Validating token for {} request", req.method());
+    let token = req.headers().get("X-Proxy-Token");
+    if !config.is_valid_token(token) {
+        warn!("🚫 Rejecting request due to invalid/missing token");
+        return Ok(Response::builder()
+            .status(403)
+            .body(Body::from("Invalid or missing token"))
+            .unwrap());
     }
 
-    // Handle HTTPS CONNECT method
+    // Handle HTTPS CONNECT method vs normal HTTP
     if req.method() == Method::CONNECT {
         info!("Routing to HTTPS CONNECT handler");
         handle_connect(req).await
@@ -211,7 +210,7 @@ async fn main() {
     std::io::Write::flush(&mut std::io::stdout()).ok();
     std::io::Write::flush(&mut std::io::stderr()).ok();
 
-    // Print to stdout BEFORE tracing init - these will show in Render logs
+    // Print to stdout BEFORE tracing init
     println!("=== STARTING PROXY SERVER ===");
     println!("Current directory: {:?}", std::env::current_dir());
     println!("Checking for config.toml...");
@@ -248,13 +247,12 @@ async fn main() {
         Err(e) => {
             eprintln!("❌ Failed to load config.toml: {e:?}");
             error!("❌ Failed to load config.toml: {e:?}");
-            // Keep process alive briefly so logs flush
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             std::process::exit(1);
         }
     };
 
-    // Override port with PORT environment variable if set (required for Render)
+    // Override port with PORT environment variable if set
     let port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
